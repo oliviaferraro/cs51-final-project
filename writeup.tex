@@ -1,0 +1,145 @@
+\documentclass{report}
+\usepackage[utf8]{inputenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{minted}
+\usemintedstyle{numpy}
+
+\title{\Huge CS51 Final Project: Writeup}
+\author{\Large Olivia Ferraro }
+\date{May 2, 2018}
+\usepackage{natbib}
+\usepackage{graphicx}
+
+\begin{document}
+
+\maketitle
+
+\section{Extensions}
+
+\subsection{Lexical Scoping}
+The first extension I chose to include is the implementation of a lexically-scoped environment for \mintinline{ocaml}{MiniML}. I chose this extension because the concept of a \mintinline{ocaml}{Closure of (expr * env)} was at first both confusing and intriguing to me, and I wanted to explore it more and try my own hand at its implementation. To do this, I completed \mintinline{ocaml}{eval_l}, beginning first with the skeleton code provided to me in the source code. 
+\newline \newline 
+Lexical scoping means that a given function is evaluated within the environment in which it was defined. This is in contrast to substitution and environment semantics, both of which I implemented in \mintinline{ocaml}{eval_s} and \mintinline{ocaml}{eval_d} respectively. In \mintinline{ocaml}{eval_s} the substitution model is used to evaluate expressions in a constant environment, while in \mintinline{ocaml}{eval_d} expressions are evaluated a dynamic environment. 
+\newline \newline 
+To best describe the relationship between environment and lexical semantics, consider an expression \mintinline{ocaml}{e1} that is used within another expression \mintinline{ocaml}{e2}. Within the environment in which it was defined, \mintinline{ocaml}{e2} evaluates to some value, \mintinline{ocaml}{v1}. Following environment semantics, if \mintinline{ocaml}{e1} is redefined between the time \mintinline{ocaml}{e2} is defined and the time \mintinline{ocaml}{e2} is evaluated, evaluating \mintinline{ocaml}{e2} in the most current environment will yield different results, some value, \mintinline{ocaml}{v2}, rather than \mintinline{ocaml}{v1}.
+\newline \newline
+However, if evaluated in a lexically-scoped environment,  \mintinline{ocaml}{e2} will always evaluate to \mintinline{ocaml}{v1}. This is true because expressions are evaluated within the environment in which they were originally defined, meaning any redefinition of any components of the original expression, \mintinline{ocaml}{e2}, will have no influence on the evaluation of \mintinline{ocaml}{e2}. To implement this, I used my \mintinline{ocaml}{eval_d} as a starting off point. The only cases that vary between the two environments are those for \mintinline{ocaml}{Fun of varid * expr} and \mintinline{ocaml}{App of expr * expr}. Yet, I did not call \mintinline{ocaml}{eval_d} on these cases as to shorten my code because for simple operations like \mintinline{ocaml}{Binop of binop * expr * expr}, each element must be evaluated to a value before the binary operation can be completed, and there might be an \mintinline{ocaml}{App of expr * expr} within one of the expressions of in which evaluating within a dynamic enviroment would be incorrect.
+\newline \newline 
+For the \mintinline{ocaml}{Fun of varid * expr} case, instead of returning just an \mintinline{ocaml}{Env.Val} containing the expression, I returned an \mintinline{ocaml}{Env.Closure} containing a tuple with the expression, \mintinline{ocaml}{exp}, and the current environment, \mintinline{ocaml}{env}.
+\begin{minted}{ocaml}
+| Fun (_, _) -> Env.close exp env
+\end{minted}
+\newline \newline
+As a result, within the \mintinline{ocaml}{App of expr * expr} case, evaluating the first expression within the tuple should yield an \mintinline{ocaml}{Env.Closure} as only functions that eventually match with \mintinline{ocaml}{Fun of varid * expr} can be applied to arguments, and the \mintinline{ocaml}{Fun of varid * expr} is the only case that will ever produce a \mintinline{ocaml}{Env.Closure} when evaluated. Thus, \mintinline{ocaml}{Fun of varid * expr} is the only possible expression that can be stored in a \mintinline{ocaml}{Env.Closure}. As a result, an additional match statement to check for other types of expressions is unnecessary. The environment contained within the resulting \mintinline{ocaml}{Env.Closure} is then extended to include the \mintinline{ocaml}{varid} of the function bound to a \mintinline{ocaml}{ref Env.Val} containing the original argument of \mintinline{ocaml}{App of expr * expr} evaluated. This extended environment is the one that is then used to evaluate the body of function.\citep{closures}
+
+\begin{minted}{ocaml}
+
+| App (a, b) ->
+  (match eval_l a env with
+  | Env.Closure (Fun (x, y), fun_env) ->
+    let new_env = Env.extend fun_env x (ref (eval_l b env)) in
+    eval_l y new_env 
+  | Env.Val x -> 
+    (match x with
+    | App (_, _) as j -> eval_l j env
+    | _ -> raise(EvalError 
+      "This is not a function; it cannot be applied."))) ;;
+
+\end{minted}
+\newline \newline
+In addition to matching for a \mintinline{ocaml}{Env.Closure} when evaluating the first element of \mintinline{ocaml}{App of expr * expr}, I also included a match for \mintinline{ocaml}{Env.Val} with expression \mintinline{ocaml}{App of expr * expr}. I did this because in the case that the application itself contains other applications and so on, nested applications would need to be evaluated accordingly.
+
+\subsection{Floats}
+The second extension I chose for my version of \mintinline{ocaml}{MiniML} is support for the \mintinline{ocaml}{float} type. In adding \mintinline{ocaml}{floats}, I differentiated between the original numeric constructor provided, renaming the source code's \mintinline{ocaml}{Num} expression \mintinline{ocaml}{Int} and adding the \mintinline{ocaml}{Float} expression. 
+\newline \newline
+I did this by reading through documentation online, \citep{lexing} \mintinline{ocaml}{miniml_parse.mly}, \mintinline{ocaml}{miniml_lex.mll}, as well as the project specification and links provided in \mintinline{ocaml}{project.pdf} about parsing and lexing. Once I had a basic understanding of the topic, I added the appropriate token: 
+
+\begin{minted}{ocaml}
+%token <float> FLOAT
+\end{minted}
+\newline \newline
+along with the corresponding grammar definition, both in \mintinline{ocaml}{miniml_parse.mly}:
+
+\begin{minted}{ocaml}
+
+| FLOAT                 { Float $1 }
+
+\end{minted}
+\newline \newline
+From there, I edited \mintinline{ocaml}{miniml_lex.mll} to contain the regular expressions necessary to support the \mintinline{ocaml}{float} type: \citep{lexing}
+
+\begin{minted}{ocaml}
+
+let frac = '.' digit*
+let exp = ['e' 'E'] ['-' '+']? digit+
+let float = digit* frac? exp?
+
+\end{minted}
+
+\newline \newline
+and the appropriate lexing rules:
+\begin{minted}{ocaml}
+
+| float as ifl
+    { let fl = float_of_string ifl in
+        FLOAT fl
+    }
+
+\end{minted}
+\newline \newline
+With \mintinline{ocaml}{miniml_parse.mly} and \mintinline{ocaml}{miniml_lex.ml} updated, I then revisited my helper functions in \mintinline{ocaml}{expr.ml} and \mintinline{ocaml}{evaluation.mll}. Because I abstracted away conversion to string and simple operations by delegating them to helper functions in both these files, adding functionality to support \mintinline{ocaml}{floats} was not tremendously laborious. In addition, to make my version if \mintinline{ocaml}{MiniML} more user-friendly, I abstracted away the separate symbols for binary operations OCaml uses for \mintinline{ocaml}{ints} and \mintinline{ocaml}{floats}. Instead, the simpler symbols (reserved exclusively for \mintinline{ocaml}{ints} in OCaml) can be applied to \mintinline{ocaml}{floats} as well, provided both arguments are of the same type.
+
+\subsection{More Binary Operations}
+In addition to including a lexically-scoped environment and support for the \mintinline{ocaml}{float} type, I also added two new binary operations of type \mintinline{ocaml}{binop}. I added \mintinline{ocaml}{Div}, which divides the first expression by the second, as well as \mintinline{ocaml}{GreaterThan}, which returns \mintinline{ocaml}{Bool true} if the first argument is greater than the second. Although the user could derive both of these operations through the functionality provided in the original source code, multiplying by the inverse for \mintinline{ocaml}{Div} and reversing the arguments of a \mintinline{ocaml}{LessThan} expression for \mintinline{ocaml}{GreaterThan}, providing them simplifies the user's experience.
+\newline \newline
+To add both of these operations, I followed a similar protocol as outlined above in the implementation of the \mintinline{ocaml}{float} type. My first steps were to add both the \mintinline{ocaml}{/} and \mintinline{ocaml}{>} symbols as recognized tokens, designate their association, and add the corresponding grammar definition in \mintinline{ocaml}{miniml_parse.mly}.
+\newline \newline
+Tokens:
+\begin{minted}{ocaml}
+
+%token GREATERTHAN
+%token TIMES DIV
+
+\end{minted}
+\newline \newline
+Association:
+\begin{minted}{ocaml}
+
+%nonassoc GREATERTHAN
+%left TIMES DIV
+
+\end{minted}
+\newline \newline
+Grammar Definition:
+\begin{minted}{ocaml}
+
+| exp DIV exp           { Binop(Div, $1, $3) }
+| exp GREATERTHAN exp   { Binop(GreaterThan, $1, $3) }
+
+\end{minted}
+\newline \newline
+Then, I added them to my \mintinline{ocaml}{sym_table} in \mintinline{ocaml}{miniml_lex.mll}. \mintinline{ocaml}{sym_table} provides a sort of dictionary for parsing by forming the link between the recognized tokens and the grammar definitions of expressions in my implementation of \mintinline{ocaml}{MiniML}:
+
+\begin{minted}{ocaml}
+
+(">", GREATERTHAN);
+("/", DIV);
+
+\end{minted}
+\newline \newline
+With this, the only thing left was to go into \mintinline{ocaml}{expr.ml} and \mintinline{ocaml}{evaluation.mll} and update my helper functions to deal with the new operations. As aforementioned, this step was quite simple as the changes required were contained within a handful of smaller helper functions rather than the larger, essential functions. In addition, I also abstracted away the \mintinline{ocaml}{Div} operator's differing functionality on \mintinline{ocaml}{ints} vs. \mintinline{ocaml}{floats} to simplify the user's experience.
+
+\begin{thebibliography}{9}
+
+\bibitem{closures} 
+Cornell CS 3110: Lecture 8. Closures,
+\\\texttt{https://www.cs.cornell.edu/courses/cs3110/2014fa/lectures/8/lec08.pdf}
+
+\bibitem{lexing} 
+Real World Ocaml: Chapter 16. Parsing with OCamllex and Menhir,
+\\\texttt{https://realworldocaml.org/v1/en/html/parsing-with-ocamllex-and-menhir.html}
+
+\end{thebibliography}
+
+\end{document}
